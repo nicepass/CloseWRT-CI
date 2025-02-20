@@ -66,7 +66,7 @@ UPDATE_PACKAGE "luci-app-gecoosac" "lwb1978/openwrt-gecoosac" "main"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
 
 UPDATE_PACKAGE "lazyoop" "lazyoop/networking-artifact" "main"
-
+UPDATE_PACKAGE "5gmodem" "https://github.com/Siriling/5G-Modem-Support" "main"
 if [[ $WRT_BRANCH != *"21"* ]]; then
 	UPDATE_PACKAGE "homeproxy" "VIKINGYFY/homeproxy" "main"
 	UPDATE_PACKAGE "nikki" "nikkinikki-org/OpenWrt-nikki" "main"
