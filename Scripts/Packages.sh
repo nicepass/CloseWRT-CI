@@ -68,7 +68,7 @@ UPDATE_PACKAGE "luci-app-gecoosac" "lwb1978/openwrt-gecoosac" "main"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
 
 UPDATE_PACKAGE "lazyoop" "lazyoop/networking-artifact" "main"
-
+UPDATE_PACKAGE "5gmodem" "Siriling/5G-Modem-Support" "main"
 #更新软件包版本
 UPDATE_VERSION() {
 	local PKG_NAME=$1
