@@ -12,7 +12,6 @@ CONFIG_PACKAGE_luci-app-eqos-mtk=y
 CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
 CONFIG_PACKAGE_luci-app-upnp-mtk-adjust=y
 CONFIG_PACKAGE_luci-app-turboacc-mtk=y
-CONFIG_PACKAGE_openssh-sftp-server=y
 #删除插件
 CONFIG_PACKAGE_luci-app-ddns=n
 CONFIG_PACKAGE_luci-app-wolplus=n
@@ -24,4 +23,5 @@ CONFIG_PACKAGE_luci-app-filetransfer=n
 CONFIG_PACKAGE_luci-app-unblockmusic=n
 CONFIG_PACKAGE_luci-app-accesscontrol=n
 CONFIG_PACKAGE_luci-app-fileassistant=n
-CONFIG_PACKAGE_luci-app-samba4=y
+CONFIG_PACKAGE_luci-app-samba4n
+CONFIG_PACKAGE_openssh-sftp-server=n
