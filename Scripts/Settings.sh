@@ -1,5 +1,8 @@
 #!/bin/bash
 
+#qmodem强制安装以覆盖现有的驱动程序/应用，防止驱动冲突
+./scripts/feeds install -a -f -p qmodem
+
 #修改默认主题
 sed -i "s/luci-theme-bootstrap/luci-theme-$WRT_THEME/g" $(find ./feeds/luci/collections/ -type f -name "Makefile")
 #修改immortalwrt.lan关联IP
