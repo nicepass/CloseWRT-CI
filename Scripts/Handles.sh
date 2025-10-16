@@ -85,3 +85,6 @@ if [ -f "$DM_FILE" ]; then
 
 	cd $PKG_PATH && echo "diskman has been fixed!"
 fi
+
+#qmodem强制安装以覆盖现有的驱动程序/应用，防止驱动冲突
+./scripts/feeds install -a -f -p qmodem
