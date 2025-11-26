@@ -153,7 +153,7 @@ jobs:
       - name: Update Feeds
         run: |
           cd ./wrt/
-
+          echo "src-git ndisc6 https://github.com/tatsushi/ndisc6-openwrt" >> feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
