@@ -175,6 +175,9 @@ jobs:
           fi
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
+          
+          # 强制安装以覆盖现有的驱动程序/应用
+          ./scripts/feeds install -a -f -p qmodem
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
