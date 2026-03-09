@@ -175,6 +175,18 @@ jobs:
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
           fi
 
+          # 加入额外插件
+          if [ -n "$WRT_PACKAGE" ]; then
+          echo "Adding custom packages:"
+          echo "$WRT_PACKAGE"
+
+          for pkg in $WRT_PACKAGE; do
+          echo "CONFIG_PACKAGE_$pkg=y" >> .config
+          done
+          fi
+
+          # 解决 qmodem 依赖
+          echo "CONFIG_PACKAGE_ndisc6=y" >> .config
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
