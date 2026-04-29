@@ -16,6 +16,7 @@ on:
         options:
           - MT7981
           - MT7986
+          - CPE
           - TEST
       SOURCE:
         default: 'Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly'
