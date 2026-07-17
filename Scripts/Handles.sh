@@ -336,24 +336,30 @@ if [ -f "$RUST_FILE" ]; then
 fi
 
 # =================================================================
-# 强行将固件编译环境的 Golang 升级至 1.24 官方分支
+# 强行从官方 master 分支拉取最新版 Golang 编译器 (已支持 Go 1.24+)
 # =================================================================
-echo "Upgrading Golang compiler to 1.24 branch..."
+echo "Fetching latest Golang from openwrt/packages master branch..."
 
-# 通过 PKG_PATH 逆向推导 feeds 目录的绝对路径
+# 通过 PKG_PATH 推导 feeds 目录的绝对路径
 FEEDS_DIR="$(dirname "$PKG_PATH")/feeds"
 
-# 删掉旧的 golang 源码
+# 确保旧的残留彻底清理干净
 rm -rf "$FEEDS_DIR/packages/lang/golang"
-
-# 浅克隆官方最新的 1.24 分支到临时目录
-git clone --depth=1 -b 1.24 https://github.com/openwrt/packages.git "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
-
-# 移动新版 golang 到 feeds 目录，并清理临时文件
-mv "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" "$FEEDS_DIR/packages/lang/golang"
 rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
 
-# 刷新 feeds 关联
-$(dirname "$PKG_PATH")/scripts/feeds install -a
+# 浅克隆官方最新的 master 主分支到临时目录
+git clone --depth=1 https://github.com/openwrt/packages.git "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
 
-echo "Golang 1.24 upgrade patch applied successfully!"
+# 移动新版 golang 到 feeds 目录，并清理临时目录
+if [ -d "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" ]; then
+	mv "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" "$FEEDS_DIR/packages/lang/golang"
+	echo "Golang source code replaced successfully."
+else
+	echo "Error: Failed to fetch golang from upstream master!"
+fi
+rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
+
+# 重新向系统安装刷新 feeds 关联，确保依赖识别
+$(dirname "$PKG_PATH")/scripts/feeds install -a golang
+
+echo "Golang upgrade patch processed!"
