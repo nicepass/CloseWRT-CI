@@ -232,18 +232,96 @@ if [ -d "$PKG_PATH/luci-app-mini-diskmanager" ]; then
 	fi
 fi
 
-#修复TailScale配置文件冲突
-FEEDS_PACKAGES="$PKG_PATH/../feeds/packages"
-TS_FILE="$(find "$FEEDS_PACKAGES" -maxdepth 3 -type f -wholename '*/tailscale/Makefile' -print -quit 2>/dev/null)"
-if [ -f "$TS_FILE" ]; then
-	echo " "
+# 彻底修复 Tailscale：强制首刷自启 & RAX3000M/nftables 兼容
+echo "Applying Tailscale FORCE-START fix..."
 
-	if sed -i '/\/files/d' "$TS_FILE"; then
-		echo "tailscale has been fixed!"
-	else
-		echo "tailscale fix failed; continuing!"
-	fi
+# 1. 创建所有必备目录
+mkdir -p ../files/etc/config
+mkdir -p ../files/etc/init.d
+mkdir -p ../files/etc/rc.d
+mkdir -p ../files/etc/uci-defaults
+
+# 2. 注入 UCI 配置文件 (强制全部设为 1，即默认开启)
+cat > ../files/etc/config/tailscale << 'EOF'
+config tailscale 'main'
+	option enabled '1'
+	option port '41641'
+	option fw_mode 'nftables'
+	option config_path '/etc/tailscale'
+
+config settings
+	option service_enabled '1'
+	option log_stdout '1'
+	option log_stderr '1'
+EOF
+
+# 3. 注入强力启动脚本 (解决 sock 丢失和 nftables 报错)
+cat > ../files/etc/init.d/tailscale << 'EOF'
+#!/bin/sh /etc/rc.common
+
+START=95
+USE_PROCD=1
+PROGD=/usr/sbin/tailscaled
+
+start_service() {
+    config_load tailscale
+    local enabled fw_mode port config_path
+    
+    # 获取配置，即使获取失败也默认给 1 (开启)
+    config_get_bool enabled 'main' enabled 1
+    config_get fw_mode 'main' fw_mode 'nftables'
+    config_get port 'main' port '41641'
+    config_get config_path 'main' config_path '/etc/tailscale'
+
+    [ "$enabled" -eq 0 ] && return 0
+
+    # 核心防爆：确保运行时目录绝对存在
+    mkdir -p /var/run/tailscale
+    mkdir -p "$config_path"
+
+    $PROGD --cleanup
+    procd_open_instance
+    procd_set_param command $PROGD \
+        --port "$port" \
+        --state "$config_path/tailscaled.state" \
+        --socket /var/run/tailscale/tailscaled.sock
+    
+    # 强制注入 nftables 环境，彻底解决报错
+    procd_set_param env TS_DEBUG_FIREWALL_MODE="$fw_mode"
+    procd_set_param env TS_NO_LOGS_NO_SUPPORT=true
+    
+    procd_set_param respawn
+    procd_close_instance
+}
+
+stop_service() {
+    $PROGD --cleanup
+    rm -rf /var/run/tailscale
+}
+EOF
+chmod +x ../files/etc/init.d/tailscale
+
+# 4. 第一道保险：创建常规自启软链接
+ln -sf ../init.d/tailscale ../files/etc/rc.d/S95tailscale
+
+# 5. 第二道保险（终极杀器）：首次开机强制执行脚本
+# 该脚本只在刚刷完固件第一次开机时运行一次，运行后系统会自动将其删除
+cat > ../files/etc/uci-defaults/99-force-tailscale << 'EOF'
+#!/bin/sh
+# 强制激活服务并立即启动
+/etc/init.d/tailscale enable
+/etc/init.d/tailscale start
+exit 0
+EOF
+chmod +x ../files/etc/uci-defaults/99-force-tailscale
+
+# 6. 解决核心包 Makefile 冲突 (清空原生启动脚本，防止覆盖我们的补丁)
+TS_FILE=$(find ../feeds/packages/ -maxdepth 3 -type f -wholename "*/tailscale/Makefile")
+if [ -f "$TS_FILE" ]; then
+	sed -i '/\/files/d' $TS_FILE
 fi
+
+echo "Tailscale FORCE-START fix applied successfully!"
 
 #修复Rust编译失败
 RUST_FILE="$(find "$FEEDS_PACKAGES" -maxdepth 3 -type f -wholename '*/rust/Makefile' -print -quit 2>/dev/null)"
