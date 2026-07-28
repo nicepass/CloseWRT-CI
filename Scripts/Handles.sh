@@ -363,3 +363,8 @@ rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
 $(dirname "$PKG_PATH")/scripts/feeds install -a golang
 
 echo "Golang upgrade patch processed!"
+
+# 移除与 QModem 冲突且会导致 6.6 内核报错的 MTK 原厂 5G 驱动
+rm -rf package/mtk/applications/5g-modem
+
+echo "remove 5g-modem package OK!"
