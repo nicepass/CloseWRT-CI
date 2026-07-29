@@ -366,24 +366,27 @@ echo "Golang upgrade patch processed!"
 
 # 修复广和通 QMI 驱动 (qmi_wwan_f.c) 适配 Linux 6.6 内核
 # 1. 自动定位 MTK SDK / OpenWrt 源码根目录
-WRT_DIR=""
+WRT_PATH=""
 if [ -d "/mnt/build_wrt/package" ]; then
-    WRT_DIR="/mnt/build_wrt"
+    WRT_PATH="/mnt/build_wrt"
 elif [ -d "package" ]; then
-    WRT_DIR="."
+    WRT_PATH="."
 elif [ -d "openwrt/package" ]; then
-    WRT_DIR="openwrt"
+    WRT_PATH="openwrt"
 fi
 
-# 2. 如果找到了 package 目录，针对 MTK 驱动执行 API 修正
-if [ -n "$WRT_DIR" ]; then
-    echo "Find WRT root at: $WRT_DIR, patching MTK Fibocom QMI driver..."
-
-    # 修复广和通 QMI 驱动 (qmi_wwan_f.c) 适配 Linux 6.6 内核 API (u64_stats)
-    find "$WRT_DIR/package" -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' {} + 2>/dev/null || true
-    find "$WRT_DIR/package" -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' {} + 2>/dev/null || true
-else
-    echo "Warning: package directory not found in current workspace."
+if [ -n "$WRT_PATH" ]; then
+    echo "========================================="
+    echo "Located OpenWrt Source Root at: $WRT_PATH"
+    echo "========================================="
+    cd "$WRT_PATH" || exit 1
 fi
 
-echo "fibocom_QMI_WWAN has been fixed!"
+# 2. 批量修复 5G 模块驱动 (Fibocom / Quectel / SIMCom) 适配 Kernel 6.6 API
+if [ -d "package" ]; then
+    echo "Patching all QMI WWAN drivers (qmi_wwan*.c) for Kernel 6.6..."
+    find package/ -type f -name "qmi_wwan*.c" -exec sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' {} + 2>/dev/null || true
+    find package/ -type f -name "qmi_wwan*.c" -exec sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' {} + 2>/dev/null || true
+fi
+
+echo "5G has been fixed!"
