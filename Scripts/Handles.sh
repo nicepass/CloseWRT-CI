@@ -364,7 +364,10 @@ $(dirname "$PKG_PATH")/scripts/feeds install -a golang
 
 echo "Golang upgrade patch processed!"
 
-# 移除与 QModem 冲突且会导致 6.6 内核报错的 MTK 原厂 5G 驱动
-rm -rf package/mtk/applications/5g-modem
+# 修复 fibocom_QMI_WWAN 适配 Linux 6.6 内核 API 的问题
+if [ -d "package/mtk/applications/5g-modem/fibocom_QMI_WWAN" ]; then
+    sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' $(find package/mtk/applications/5g-modem/fibocom_QMI_WWAN/ -name "qmi_wwan_f.c")
+    sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' $(find package/mtk/applications/5g-modem/fibocom_QMI_WWAN/ -name "qmi_wwan_f.c")
+fi
 
-echo "remove 5g-modem package OK!"
+echo "fibocom_QMI_WWAN has been fixed!"
