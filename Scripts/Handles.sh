@@ -364,10 +364,8 @@ $(dirname "$PKG_PATH")/scripts/feeds install -a golang
 
 echo "Golang upgrade patch processed!"
 
-# 修复 fibocom_QMI_WWAN 适配 Linux 6.6 内核 API 的问题
-if [ -d "package/mtk/applications/5g-modem/fibocom_QMI_WWAN" ]; then
-    sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' $(find package/mtk/applications/5g-modem/fibocom_QMI_WWAN/ -name "qmi_wwan_f.c")
-    sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' $(find package/mtk/applications/5g-modem/fibocom_QMI_WWAN/ -name "qmi_wwan_f.c")
-fi
+# 修复 Linux 6.6 内核下 fibocom_QMI_WWAN API 不兼容导致的编译失败
+find package/ -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' {} +
+find package/ -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' {} +
 
 echo "fibocom_QMI_WWAN has been fixed!"
