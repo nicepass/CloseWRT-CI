@@ -364,8 +364,26 @@ $(dirname "$PKG_PATH")/scripts/feeds install -a golang
 
 echo "Golang upgrade patch processed!"
 
-# 修复 Linux 6.6 内核下 fibocom_QMI_WWAN API 不兼容导致的编译失败
-find package/ -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' {} +
-find package/ -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' {} +
+# 修复广和通 QMI 驱动 (qmi_wwan_f.c) 适配 Linux 6.6 内核
+# 1. 自动定位 MTK SDK / OpenWrt 源码根目录
+WRT_DIR=""
+if [ -d "/mnt/build_wrt/package" ]; then
+    WRT_DIR="/mnt/build_wrt"
+elif [ -d "package" ]; then
+    WRT_DIR="."
+elif [ -d "openwrt/package" ]; then
+    WRT_DIR="openwrt"
+fi
+
+# 2. 如果找到了 package 目录，针对 MTK 驱动执行 API 修正
+if [ -n "$WRT_DIR" ]; then
+    echo "Find WRT root at: $WRT_DIR, patching MTK Fibocom QMI driver..."
+
+    # 修复广和通 QMI 驱动 (qmi_wwan_f.c) 适配 Linux 6.6 内核 API (u64_stats)
+    find "$WRT_DIR/package" -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_begin_irq/u64_stats_fetch_begin/g' {} + 2>/dev/null || true
+    find "$WRT_DIR/package" -type f -name "qmi_wwan_f.c" -exec sed -i 's/u64_stats_fetch_retry_irq/u64_stats_fetch_retry/g' {} + 2>/dev/null || true
+else
+    echo "Warning: package directory not found in current workspace."
+fi
 
 echo "fibocom_QMI_WWAN has been fixed!"
