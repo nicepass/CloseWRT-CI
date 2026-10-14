@@ -303,9 +303,11 @@ jobs:
           grep -n -A2 'LUCI_DEPENDS' feeds/qmodem/luci/luci-app-qmodem/Makefile 2>/dev/null || echo "(not found)"
 
           echo "--- 主包 DEPENDS 中残留的幽灵依赖检查 ---"
-          if grep -qE ':kmod-mhi-wwan|[^M]:quectel-CM-5G[^M]' feeds/qmodem/application/qmodem/Makefile 2>/dev/null; then
+          # 注意：必须行尾反斜杠锚定，否则 ':kmod-mhi-wwan' 会子串命中
+          # 有效依赖 ':kmod-mhi-wwan-ctrl' / ':kmod-mhi-wwan-mbim'（误报）
+          if grep -qE ':kmod-mhi-wwan[[:space:]]*\\$|:quectel-CM-5G[[:space:]]*\\$' feeds/qmodem/application/qmodem/Makefile 2>/dev/null; then
             echo "!!! 幽灵依赖仍存在，清理失败 !!!"
-            grep -nE ':kmod-mhi-wwan|[^M]:quectel-CM-5G[^M]' feeds/qmodem/application/qmodem/Makefile
+            grep -nE ':kmod-mhi-wwan[[:space:]]*\\$|:quectel-CM-5G[[:space:]]*\\$' feeds/qmodem/application/qmodem/Makefile
           else
             echo "OK: 幽灵依赖已清理"
           fi
