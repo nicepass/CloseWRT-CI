@@ -45,7 +45,7 @@ jobs:
 
   config:
     needs: cleanup
-    name: ${{matrix.CONFIG}}-${{matrix.SOURCE_NAME}}
+    name: ${{matrix.LABEL}}
     strategy:
       fail-fast: false
       #max-parallel: 4
@@ -58,19 +58,19 @@ jobs:
           - CONFIG: "MT7981"
             SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
             BRANCH: "openwrt-24.10-6.6"
-            SOURCE_NAME: "24.10-6.6"
+            LABEL: "MT7981-24.10-6.6"
           - CONFIG: "CPE"
             SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
             BRANCH: "openwrt-24.10-6.6"
-            SOURCE_NAME: "24.10-6.6"
+            LABEL: "CPE-24.10-6.6"
           - CONFIG: "MT7981-25.12"
             SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
             BRANCH: "25.12"
-            SOURCE_NAME: "25.12"
+            LABEL: "MT7981-25.12"
           - CONFIG: "CPE"
             SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
             BRANCH: "25.12"
-            SOURCE_NAME: "25.12"
+            LABEL: "CPE-25.12"
 
     #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
