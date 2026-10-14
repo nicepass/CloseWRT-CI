@@ -45,15 +45,27 @@ jobs:
 
   config:
     needs: cleanup
-    name: ${{matrix.CONFIG}}
+    name: ${{matrix.CONFIG}}-${{matrix.SOURCE_NAME}}
     strategy:
       fail-fast: false
       #max-parallel: 4
+      # 显式列举组合（而非笛卡尔积），避免 MT7981 被套到 25.12 源码上：
+      # MT7981.txt 是 24.10-6.6 专用配置（依赖 mt7981 子目标写法），
+      # 25.12 源码的子目标是 mediatek_filogic，两者不能混用。
       matrix:
-        CONFIG: [MT7981, CPE]
-        REPO_INFO:
-          - {SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly", BRANCH: "openwrt-24.10-6.6"}
-          #- {SOURCE: "chasey-dev/immortalwrt-mt798x-rebase", BRANCH: "25.12"}
+        include:
+          - CONFIG: "MT7981"
+            SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
+            BRANCH: "openwrt-24.10-6.6"
+            SOURCE_NAME: "24.10-6.6"
+          - CONFIG: "CPE"
+            SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
+            BRANCH: "openwrt-24.10-6.6"
+            SOURCE_NAME: "24.10-6.6"
+          - CONFIG: "CPE"
+            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
+            BRANCH: "25.12"
+            SOURCE_NAME: "25.12"
 
     #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
@@ -73,11 +85,11 @@ jobs:
       #默认密码，仅作提示，修改无用
       WRT_PW: 无
       #源码链接
-      WRT_REPO: https://github.com/${{matrix.REPO_INFO.SOURCE}}.git
+      WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
       #源码分支
-      WRT_BRANCH: ${{matrix.REPO_INFO.BRANCH}}
+      WRT_BRANCH: ${{matrix.BRANCH}}
       #源码名称
-      WRT_SOURCE: ${{matrix.REPO_INFO.SOURCE}}
+      WRT_SOURCE: ${{matrix.SOURCE}}
       #插件调整
       WRT_PACKAGE: ${{inputs.PACKAGE}}
       #仅输出配置文件
