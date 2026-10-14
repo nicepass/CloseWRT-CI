@@ -1,0 +1,19 @@
+#设备平台
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+#设备列表
+# 注意：本文件为 25.12 源码专用（chasey-dev/immortalwrt-mt798x-rebase @ 25.12）。
+# 与 24.10-6.6 的 MT7981.txt 唯一区别：
+#   25.12 的 filogic.mk 只定义 cmcc_rax3000m / cmcc_rax3000me，
+#   没有 24.10 才有的 cmcc_rax3000m-nand-mtk 与 cmcc_rax3000m-emmc-mtk。
+#   故此处仅保留 25.12 实际存在的设备。
+CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_cmcc_rax3000m=y
+#必选组件
+CONFIG_first_card_name="MT7981"
+CONFIG_MTK_CHIP_MT7981=y
+CONFIG_MTK_CONNINFRA_APSOC_MT7981=y
+CONFIG_MTK_FIRST_IF_MT7981=y
+CONFIG_MTK_MT7981_NEW_FW=n
+CONFIG_WARP_CHIPSET="mt7981"
+# CONFIG_WARP_NEW_FW 在 25.12 已移除，声明为 n 会被 kconfig 静默忽略
+CONFIG_WARP_NEW_FW=n

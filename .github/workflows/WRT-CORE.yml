@@ -274,13 +274,31 @@ jobs:
             ./scripts/feeds update -i
           fi
 
-          # -p qmodem: 同名包存在多个 feed 时优先用 qmodem 的版本
-          # （官方文档推荐：feeds install -a -p qmodem）
+          # 【重要】不能用 `feeds install -a -p qmodem`。
+          #
+          # 该写法来自 V-OWRT-CI（跑 24.10 系 immortalwrt），但 25.12 的
+          # scripts/feeds 改写了 -a/-p 的组合语义（见 feeds 第 726-736 行）：
+          #   if($opts{a}) {
+          #     foreach my $f (@feeds) {
+          #       if (!defined($opts{p}) or $opts{p} eq $f->[1]) {   # ← 过滤！
+          #         printf "Installing all packages from feed %s.\n", $f->[1];
+          #         ... 只安装这个 feed 的包 ...
+          #   }
+          # 即 `-a -p qmodem` = 「**只**安装 qmodem feed 的包」，跳过其它所有 feed。
+          #
+          # 实测后果（CI run 38522316509，25.12 job）：
+          #   24.10: Installing package 共 2033 次（packages 1709 / luci 227 / ...）
+          #   25.12: Installing package 共  107 次（packages   60 / luci  13 / ...）
+          #   → tailscale/sing-box/parted/yq/btrfs-progs/lua-cjson 等 packages feed
+          #     的包从未安装、从未编译 → 索引缺失 → 最终 package/install 报
+          #     ERROR: unable to select packages: tailscale (no such package) 等 8 项
+          #
+          # 而 qmodem 的包名（qmodem-*/quectel_*/tom_modem/ndisc6/...）经核对
+          # 与 immortalwrt 官方 feed 无任何同名冲突，因此 -p 参数本就不必要。
           if [[ "${WRT_CONFIG^^}" == *"CPE"* ]]; then
-            ./scripts/feeds install -a -p qmodem
-          else
-            ./scripts/feeds install -a
+            echo "Installing all feeds (qmodem included; no -p filter)"
           fi
+          ./scripts/feeds install -a
 
       - name: Verify QModem Registration
         if: ${{ contains(inputs.WRT_CONFIG, 'CPE') }}

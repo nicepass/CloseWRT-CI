@@ -49,9 +49,10 @@ jobs:
     strategy:
       fail-fast: false
       #max-parallel: 4
-      # 显式列举组合（而非笛卡尔积），避免 MT7981 被套到 25.12 源码上：
-      # MT7981.txt 是 24.10-6.6 专用配置（依赖 mt7981 子目标写法），
-      # 25.12 源码的子目标是 mediatek_filogic，两者不能混用。
+      # 显式列举组合（而非笛卡尔积），便于为不同源码指定专用 Config：
+      #  - MT7981.txt       : 24.10-6.6 专用（含 cmcc_rax3000m-nand-mtk）
+      #  - MT7981-25.12.txt : 25.12 专用（25.12 无 -nand-mtk/-emmc-mtk 设备）
+      #  - CPE.txt          : 两套源码共用（target 与设备在两套中一致）
       matrix:
         include:
           - CONFIG: "MT7981"
@@ -62,6 +63,10 @@ jobs:
             SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
             BRANCH: "openwrt-24.10-6.6"
             SOURCE_NAME: "24.10-6.6"
+          - CONFIG: "MT7981-25.12"
+            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
+            BRANCH: "25.12"
+            SOURCE_NAME: "25.12"
           - CONFIG: "CPE"
             SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
             BRANCH: "25.12"
