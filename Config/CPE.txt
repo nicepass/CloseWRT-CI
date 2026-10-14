@@ -18,6 +18,5 @@ CONFIG_PACKAGE_kmod-rmnet-core=y
 CONFIG_PACKAGE_kmod-rmnet-ctl-api=y
 CONFIG_PACKAGE_kmod-qmi_wwan_q=y
 #添加CPE插件
-CONFIG_PACKAGE_luci-app-qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem-sms=y
+CONFIG_PACKAGE_luci-app-qmodem-next=y
 CONFIG_PACKAGE_ndisc6=y
