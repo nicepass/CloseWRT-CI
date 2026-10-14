@@ -204,19 +204,21 @@ jobs:
               fi
             done
           fi
-          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]] && [ -d feeds/qmodem/driver ]; then
-            for pair in \
-              "quectel_QMI_WWAN:qmi_wwan_q" \
-              "fibocom_QMI_WWAN:qmi_wwan_f" \
-              "simcom_QMI_WWAN:qmi_wwan_s" \
-              "quectel_MHI:pcie_mhi"; do
-              old="${pair%%:*}"; new="${pair##*:}"
-              if [ -d "feeds/qmodem/driver/$old" ]; then
-                mv "feeds/qmodem/driver/$old" "feeds/qmodem/driver/$new"
-                echo "QModem feed: renamed driver/$old -> $new"
-              fi
-            done
-          fi
+          # 【重要】driver/ 下的包**不能改名**。
+          # 它们是 KernelPackage（内核模块），与 application/ 下的普通包规则不同：
+          #   - 普通包（define Package/x）: feeds 用【目录名】注册，
+          #     故目录名必须 == PKG_NAME，否则依赖无法解析。
+          #   - 内核包（define KernelPackage/x）: KernelPackage 宏会生成
+          #     CONFIG_PACKAGE_kmod-x 符号，**包名由宏 + PKG_NAME 决定**，
+          #     目录名本身不参与包名生成。
+          # 实测教训：把 driver/fibocom_QMI_WWAN 改名为 qmi_wwan_f 后，
+          #   feeds 按目录名注册为 'qmi_wwan_f'，安装阶段按 kmod-qmi_wwan_f
+          #   查找时找不到，报：
+          #     pkg_hash_check_unresolved: cannot find dependency kmod-qmi_wwan_f for qmodem
+          #     opkg_install_cmd: Cannot install package luci-app-qmodem-next
+          #   （.config 阶段无异常，因为 kconfig symbol 仍来自 KernelPackage 定义；
+          #     只有打包安装阶段才暴露 → 故此前配置验证无法发现）
+          # 结论：driver/ 保持原始目录名不动。
 
           # 修正上游 QModem 主包的幽灵依赖。
           # kconfig 在解析包可见性时会检查 DEPENDS 中所有条目，只要有一条
