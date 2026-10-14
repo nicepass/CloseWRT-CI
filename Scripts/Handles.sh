@@ -336,33 +336,70 @@ if [ -f "$RUST_FILE" ]; then
 fi
 
 # =================================================================
-# 强行从官方 master 分支拉取最新版 Golang 编译器 (已支持 Go 1.24+)
+# Golang 工具链处理（按源码分支区分，两套源码需求相反！）
 # =================================================================
-echo "Fetching latest Golang from openwrt/packages master branch..."
+# 24.10-6.6: 原生 golang 版本偏旧，需从 openwrt/packages master 拉新版覆盖。
+# 25.12    : **不能替换**。25.12 原生已提供 golang1.26（=Go 1.26.8），
+#            而 master 分支的包名是 golang1.27。替换后：
+#              1) 25.12 其它包引用的 golang1.26/host 全部失效
+#                 （实测 5 处 WARNING: 'golang/host' does not exist）
+#              2) apk 体系下重新注册失败
+#                 （实测 WARNING: 'golang1.27/host' does not exist）
+#              3) 最终回落到宿主机 go 1.25.8 + GOTOOLCHAIN=local
+#            实测后果（tailscale 编译失败）：
+#              go: go.mod requires go >= 1.26.3
+#                  (running go 1.25.8; GOTOOLCHAIN=local)
+#            见 CI run 38512637758 的 CPE-25.12 job。
+# =================================================================
 
 # 通过 PKG_PATH 推导 feeds 目录的绝对路径
 FEEDS_DIR="$(dirname "$PKG_PATH")/feeds"
 
-# 确保旧的残留彻底清理干净
-rm -rf "$FEEDS_DIR/packages/lang/golang"
-rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
-
-# 浅克隆官方最新的 master 主分支到临时目录
-git clone --depth=1 https://github.com/openwrt/packages.git "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
-
-# 移动新版 golang 到 feeds 目录，并清理临时目录
-if [ -d "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" ]; then
-	mv "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" "$FEEDS_DIR/packages/lang/golang"
-	echo "Golang source code replaced successfully."
+if [[ "${WRT_BRANCH}" == *"25.12"* ]]; then
+	echo "25.12 detected: skipping Golang replacement (native golang1.26 = Go 1.26.8 is sufficient)."
 else
-	echo "Error: Failed to fetch golang from upstream master!"
+	echo "Fetching latest Golang from openwrt/packages master branch..."
+
+	# 确保旧的残留彻底清理干净
+	rm -rf "$FEEDS_DIR/packages/lang/golang"
+	rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
+
+	# 浅克隆官方最新的 master 主分支到临时目录
+	git clone --depth=1 https://github.com/openwrt/packages.git "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
+
+	# 移动新版 golang 到 feeds 目录，并清理临时目录
+	if [ -d "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" ]; then
+		mv "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go/lang/golang" "$FEEDS_DIR/packages/lang/golang"
+		echo "Golang source code replaced successfully."
+	else
+		echo "Error: Failed to fetch golang from upstream master!"
+	fi
+	rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
+
+	# 重新向系统安装刷新 feeds 关联，确保依赖识别
+	"$(dirname "$PKG_PATH")/scripts/feeds" install -a golang
+
+	echo "Golang upgrade patch processed!"
 fi
-rm -rf "$(dirname "$PKG_PATH")/tmp/openwrt-packages-go"
 
-# 重新向系统安装刷新 feeds 关联，确保依赖识别
-$(dirname "$PKG_PATH")/scripts/feeds install -a golang
-
-echo "Golang upgrade patch processed!"
+# --- 通用兜底：解除 GOTOOLCHAIN 锁死（GOTOOLCHAIN=local -> auto）---
+# golang-package.mk 中 GO_PKG_BUILD_VARS 硬编码 GOTOOLCHAIN=local，
+# 使 go 无法自动下载满足 go.mod 要求的 toolchain，只能报错。
+# 改为 auto 后，若上游 go.mod 要求高于当前 go，会自动拉取匹配版本。
+GOTOOLCHAIN_FILE="$FEEDS_DIR/packages/lang/golang/golang-package.mk"
+if [ -f "$GOTOOLCHAIN_FILE" ]; then
+	if grep -q 'GOTOOLCHAIN=local' "$GOTOOLCHAIN_FILE"; then
+		sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "$GOTOOLCHAIN_FILE"
+		echo "GOTOOLCHAIN unlocked (local -> auto) in golang-package.mk"
+	else
+		echo "GOTOOLCHAIN already auto or not found in golang-package.mk; skip"
+	fi
+	# 兜底：同目录其它文件若也含该变量一并处理（幂等）
+	find "$FEEDS_DIR/packages/lang/golang" -type f -name '*.mk' -exec \
+		sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} + 2>/dev/null || true
+else
+	echo "warning: $GOTOOLCHAIN_FILE not found; GOTOOLCHAIN not patched"
+fi
 
 # 修复广和通 QMI 驱动 (qmi_wwan_f.c) 适配 Linux 6.6 内核
 # 1. 自动定位 MTK SDK / OpenWrt 源码根目录
