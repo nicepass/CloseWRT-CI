@@ -1,1 +1,421 @@
-__PLACEHOLDER_WRTCORE__
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 VIKINGYFY
+
+#云编译公用核心
+name: WRT-CORE
+
+on:
+  workflow_call:
+    inputs:
+      WRT_CONFIG:
+        required: true
+        type: string
+      WRT_THEME:
+        required: true
+        type: string
+      WRT_NAME:
+        required: true
+        type: string
+      WRT_SSID:
+        required: true
+        type: string
+      WRT_WORD:
+        required: true
+        type: string
+      WRT_IP:
+        required: true
+        type: string
+      WRT_PW:
+        required: true
+        type: string
+      WRT_REPO:
+        required: true
+        type: string
+      WRT_BRANCH:
+        required: true
+        type: string
+      WRT_SOURCE:
+        required: true
+        type: string
+      WRT_PACKAGE:
+        required: false
+        type: string
+      WRT_TEST:
+        required: false
+        type: string
+
+env:
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  WRT_CONFIG: ${{inputs.WRT_CONFIG}}
+  WRT_THEME: ${{inputs.WRT_THEME}}
+  WRT_NAME: ${{inputs.WRT_NAME}}
+  WRT_SSID: ${{inputs.WRT_SSID}}
+  WRT_WORD: ${{inputs.WRT_WORD}}
+  WRT_IP: ${{inputs.WRT_IP}}
+  WRT_PW: ${{inputs.WRT_PW}}
+  WRT_REPO: ${{inputs.WRT_REPO}}
+  WRT_BRANCH: ${{inputs.WRT_BRANCH}}
+  WRT_SOURCE: ${{inputs.WRT_SOURCE}}
+  WRT_PACKAGE: ${{inputs.WRT_PACKAGE}}
+  WRT_TEST: ${{inputs.WRT_TEST}}
+
+jobs:
+  core:
+    name: ${{inputs.WRT_SOURCE}}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Projects
+        uses: actions/checkout@main
+
+      - name: Initialization Environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt -yqq purge firefox
+          sudo -E apt -yqq update
+          sudo -E apt -yqq full-upgrade
+          sudo -E apt -yqq autoremove --purge
+          sudo -E apt -yqq autoclean
+          sudo -E apt -yqq clean
+          sudo -E apt -yqq install dos2unix libfuse-dev
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          sudo -E systemctl daemon-reload
+          sudo -E timedatectl set-timezone "Asia/Shanghai"
+
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown $USER:$USER /mnt/build_wrt
+          sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
+
+      - name: Initialization Values
+        run: |
+          echo "WRT_DATE=$(TZ=UTC-8 date +"%y.%m.%d-%H.%M.%S")" >> $GITHUB_ENV
+          echo "WRT_MARK=${GITHUB_REPOSITORY%%/*}" >> $GITHUB_ENV
+          echo "WRT_INFO=${WRT_SOURCE%%/*}" >> $GITHUB_ENV
+          echo "WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[\w]+(?=\=y)' ./Config/$WRT_CONFIG.txt)" >> $GITHUB_ENV
+          echo "WRT_WIFI=wifi-yes" >> $GITHUB_ENV
+          echo "WRT_KVER=none" >> $GITHUB_ENV
+          echo "WRT_LIST=none" >> $GITHUB_ENV
+
+      - name: Clone Code
+        run: |
+          git clone --depth=1 --single-branch --branch $WRT_BRANCH $WRT_REPO ./wrt/
+
+          cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+
+          # 如果不存在 defconfig 则直接结束工作流
+          if [ ! -d "defconfig" ]; then
+            echo "defconfig directory not found, stopping workflow."
+            exit 0
+          fi
+
+          # GitHub Action 移除国内下载源
+          PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
+          if [ -f "$PROJECT_MIRRORS_FILE" ]; then
+            sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
+          fi
+
+      - name: Check Scripts
+        run: |
+          find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
+
+      - name: Check Caches
+        id: check-cache
+        if: env.WRT_TEST != 'true'
+        uses: actions/cache@main
+        with:
+          key: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_HASH}}
+          restore-keys: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}
+          path: |
+            ./wrt/.ccache
+            ./wrt/staging_dir/host*
+            ./wrt/staging_dir/tool*
+
+      - name: Update Caches
+        if: env.WRT_TEST != 'true'
+        run: |
+          if [ -d "./wrt/staging_dir" ]; then
+            find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+              find "$DIR" -type f -exec touch {} +
+            done
+
+            mkdir -p ./wrt/tmp && echo "1" > ./wrt/tmp/.build
+
+            echo "toolchain skiped done!"
+          else
+            echo "caches missed!"
+          fi
+
+          if ${{steps.check-cache.outputs.cache-hit != 'true'}}; then
+            CACHE_LIST=$(gh cache list --key "$WRT_CONFIG-$WRT_INFO" | cut -f 1)
+            for CACHE_KEY in $CACHE_LIST; do
+              gh cache delete $CACHE_KEY
+            done
+
+            echo "caches cleanup done!"
+          fi
+
+      - name: Update Feeds
+        run: |
+          cd ./wrt/
+
+          # QModem 是 OpenWrt Feed（多包结构：application/ driver/ luci/），
+          # 必须经 feeds 机制安装 —— 直接 git clone 到 package/ 会使
+          # package/QModem/ 下的子包全部无法被扫描。
+          # 仅对 CPE 目标注入，避免影响其他固件目标。
+          # 参考: https://github.com/FUjr/QModem/blob/main/docs/user/installation.zh-cn.md
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]]; then
+            if ! grep -q 'FUjr/QModem' feeds.conf.default 2>/dev/null; then
+              echo "src-git qmodem https://github.com/FUjr/QModem.git;main" >> feeds.conf.default
+              echo "QModem feed has been added to feeds.conf.default!"
+            fi
+          fi
+
+          ./scripts/feeds update -a
+
+          # 修正上游 QModem feed 的【目录名 != PKG_NAME】问题。
+          # feeds/package 扫描用【目录名】注册包，但 Makefile 的 DEPENDS /
+          # LUCI_DEPENDS 用【PKG_NAME】引用，两者不一致时依赖永远无法解析，
+          # 整个包 symbol 被 kconfig 隐藏。
+          #
+          # 实测（git clone FUjr/QModem@main 后逐目录比对）共 10 处不一致。
+          # 其中以下 4 处位于【无条件依赖链】上，不改则 qmodem 主包或
+          # luci-app-qmodem-next 必然进不了 .config：
+          #   application/qmodem_settings    → qmodem-settings    (主包无守卫依赖)
+          #   application/ubus_at_daemon     → ubus-at-daemon     (主包无守卫依赖)
+          #   application/qmodem_smsd        → qmodem-smsd        (next 依赖)
+          #   application/sms_forwarder_next → sms-forwarder-next (next 依赖)
+          #   application/quectel_CM_5G_M    → quectel-CM-5G-M    (主包条件依赖)
+          # 其余 5 处（含 driver/ 下 4 处）虽挂在未选中 choice 下，
+          # 一并修正以消除隐患，成本为零。
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]] && [ -d feeds/qmodem/application ]; then
+            for pair in \
+              "qmodem_settings:qmodem-settings" \
+              "quectel_CM_5G_M:quectel-CM-5G-M" \
+              "ubus_at_daemon:ubus-at-daemon" \
+              "qmodem_smsd:qmodem-smsd" \
+              "qmodem_sipd:qmodem-sipd" \
+              "sms_forwarder:sms-forwarder" \
+              "sms_forwarder_next:sms-forwarder-next" \
+              "voipd:qmodem-voip"; do
+              old="${pair%%:*}"; new="${pair##*:}"
+              if [ -d "feeds/qmodem/application/$old" ]; then
+                mv "feeds/qmodem/application/$old" "feeds/qmodem/application/$new"
+                echo "QModem feed: renamed application/$old -> $new"
+              fi
+            done
+          fi
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]] && [ -d feeds/qmodem/driver ]; then
+            for pair in \
+              "quectel_QMI_WWAN:qmi_wwan_q" \
+              "fibocom_QMI_WWAN:qmi_wwan_f" \
+              "simcom_QMI_WWAN:qmi_wwan_s" \
+              "quectel_MHI:pcie_mhi"; do
+              old="${pair%%:*}"; new="${pair##*:}"
+              if [ -d "feeds/qmodem/driver/$old" ]; then
+                mv "feeds/qmodem/driver/$old" "feeds/qmodem/driver/$new"
+                echo "QModem feed: renamed driver/$old -> $new"
+              fi
+            done
+          fi
+
+          # 修正上游 QModem 主包的幽灵依赖。
+          # kconfig 在解析包可见性时会检查 DEPENDS 中所有条目，只要有一条
+          # 指向不存在的包，整个包 symbol 就不可见 → 不出现在 .config。
+          # 即使该依赖挂在未选中的 choice 选项下也一样（已知 kconfig 行为）。
+          #
+          # 两个不存在的包：
+          #   kmod-mhi-wwan  → 本源码内核只有 kmod-mhi-wwan-ctrl /
+          #                    kmod-mhi-wwan-mbim，没有无后缀的 kmod-mhi-wwan
+          #   quectel-CM-5G  → QModem feed 只有 quectel-CM-5G-M，无 -5G 版本
+          #                    （且仅 QWRT 固件才提供）
+          # 二者的触发选项(GENERIC_MHI_PCIe_DRIVER / USING_QWRT_QUECTEL_CM_5G)
+          # 均非本固件所选用，删除这些依赖条目不影响实际功能。
+          #
+          # 关键：必须用精确匹配（行尾的 " \" 锚定），否则会误伤：
+          #   :quectel-CM-5G-M \   ← 有效依赖，实际被选中，绝不能删
+          #   :kmod-mhi-wwan-ctrl \ ← 有效依赖，绝不能删
+          # 实测确认 sed -E '/:[pattern]\s*\\$/d' 可正确区分。
+          QMODEM_MK="feeds/qmodem/application/qmodem/Makefile"
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]] && [ -f "$QMODEM_MK" ]; then
+            if grep -qE ':kmod-mhi-wwan[[:space:]]*\\$|:quectel-CM-5G[[:space:]]*\\$' "$QMODEM_MK"; then
+              sed -i -E '/:kmod-mhi-wwan[[:space:]]*\\$/d; /:quectel-CM-5G[[:space:]]*\\$/d' "$QMODEM_MK"
+              echo "QModem: removed ghost deps (kmod-mhi-wwan, quectel-CM-5G)"
+            fi
+
+            # 自检：删除后 quectel-CM-5G-M（有效依赖）必须仍然存在
+            if grep -q 'quectel-CM-5G-M' "$QMODEM_MK"; then
+              echo "QModem: quectel-CM-5G-M preserved (OK)"
+            else
+              echo "!!! QModem: quectel-CM-5G-M 被误删，依赖链将断裂 !!!"
+            fi
+          fi
+
+          # usbutils 保险：Config 已启用 usbutils（B 方案）。
+          # 若该链在本次构建仍不可用，qmodem 会因 DEPENDS 含 +usbutils
+          # 继续被 kconfig 隐藏。此处做条件兜底：仅当 usbutils 未出现在
+          # Config 中时才从 qmodem 主包依赖里摘掉它
+          # （丢失 lsusb，不影响 QModem 主体）。
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]] && [ -f "$QMODEM_MK" ]; then
+            if grep -q '^CONFIG_PACKAGE_usbutils=y' "$GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt" 2>/dev/null; then
+              echo "QModem: usbutils enabled in Config, keeping +usbutils (lsusb available)"
+            elif grep -q '+usbutils ' "$QMODEM_MK"; then
+              sed -i 's/+usbutils //' "$QMODEM_MK"
+              echo "QModem: usbutils not enabled -> removed +usbutils (lsusb lost)"
+            fi
+          fi
+
+          # 关键：feeds update 已在重命名之前生成了 feeds/qmodem.index，
+          # 而 feeds install 读的是索引文件。必须重建索引，否则 install
+          # 仍按旧目录名注册，依赖引用依旧落空。
+          # update -i = Recreate the index only（不重新拉取仓库）
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]]; then
+            ./scripts/feeds update -i
+          fi
+
+          # -p qmodem: 同名包存在多个 feed 时优先用 qmodem 的版本
+          # （官方文档推荐：feeds install -a -p qmodem）
+          if [[ "${WRT_CONFIG^^}" == *"CPE"* ]]; then
+            ./scripts/feeds install -a -p qmodem
+          else
+            ./scripts/feeds install -a
+          fi
+
+      - name: Verify QModem Registration
+        if: ${{ contains(inputs.WRT_CONFIG, 'CPE') }}
+        run: |
+          cd ./wrt/
+
+          # 诊断输出：CI 失败时直接看这一步，不必翻上万行编译日志。
+          echo "=========== QModem 包注册情况 ==========="
+          echo "--- feeds/qmodem 目录结构 ---"
+          find feeds/qmodem -maxdepth 2 -mindepth 1 -type d 2>/dev/null | sort
+
+          echo "--- 已注册到 package/ 的 qmodem 相关包 ---"
+          find package/feeds/qmodem -maxdepth 2 -name Makefile 2>/dev/null | sort || echo "(none)"
+
+          echo "--- feeds/qmodem.index 中的 qmodem 条目 ---"
+          grep -oE '^(Package|Provides): .*qmodem.*' feeds/qmodem.index 2>/dev/null | head -40 || echo "(index missing)"
+
+          echo "--- luci-app-qmodem-next 的 LUCI_DEPENDS ---"
+          grep -n 'LUCI_DEPENDS' feeds/qmodem/luci/luci-app-qmodem-next/Makefile 2>/dev/null || echo "(not found)"
+
+          echo "--- 旧版 luci-app-qmodem 的 LUCI_DEPENDS（互斥守卫） ---"
+          grep -n -A2 'LUCI_DEPENDS' feeds/qmodem/luci/luci-app-qmodem/Makefile 2>/dev/null || echo "(not found)"
+
+          echo "--- 主包 DEPENDS 中残留的幽灵依赖检查 ---"
+          if grep -qE ':kmod-mhi-wwan|[^M]:quectel-CM-5G[^M]' feeds/qmodem/application/qmodem/Makefile 2>/dev/null; then
+            echo "!!! 幽灵依赖仍存在，清理失败 !!!"
+            grep -nE ':kmod-mhi-wwan|[^M]:quectel-CM-5G[^M]' feeds/qmodem/application/qmodem/Makefile
+          else
+            echo "OK: 幽灵依赖已清理"
+          fi
+
+          echo "--- 目录名是否已对齐 PKG_NAME ---"
+          for d in qmodem-settings quectel-CM-5G-M; do
+            if [ -d "feeds/qmodem/application/$d" ]; then
+              echo "OK: application/$d 存在"
+            else
+              echo "!!! application/$d 缺失（改名未生效）"
+            fi
+          done
+
+          echo "========================================="
+
+      - name: Custom Packages
+        run: |
+          cd ./wrt/package/
+
+          $GITHUB_WORKSPACE/Scripts/Packages.sh
+          $GITHUB_WORKSPACE/Scripts/Handles.sh
+
+      - name: Custom Settings
+        run: |
+          cd ./wrt/
+
+          if [[ "${WRT_CONFIG,,}" == *"test"* ]]; then
+            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
+          else
+            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
+          fi
+
+          $GITHUB_WORKSPACE/Scripts/Settings.sh
+
+          make defconfig -j$(nproc) && make clean -j$(nproc)
+
+      - name: Download Packages
+        if: env.WRT_TEST != 'true'
+        run: |
+          cd ./wrt/
+
+          make download -j$(nproc)
+
+      - name: Compile Firmware
+        if: env.WRT_TEST != 'true'
+        run: |
+          cd ./wrt/
+
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Machine Information
+        run: |
+          cd ./wrt/
+
+          echo "======================="
+          lscpu | grep -E "name|Core|Thread"
+          echo "======================="
+          df -h
+          echo "======================="
+          du -h --max-depth=1
+          echo "======================="
+
+      - name: Package Firmware
+        run: |
+          cd ./wrt/ && mkdir ./upload/
+
+          cp -f ./.config ./upload/Config-"$WRT_CONFIG"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_DATE".txt
+
+          if [[ $WRT_TEST != 'true' ]]; then
+            echo "WRT_KVER=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^kernel - \K[\d\.]+' {} \;)" >> $GITHUB_ENV
+            echo "WRT_LIST=$(find ./bin/targets/ -type f -name "*.manifest" -exec grep -oP '^luci-(app|theme)[^ ]*' {} \; | tr '\n' ' ')" >> $GITHUB_ENV
+
+            find ./bin/targets/ -iregex ".*\(buildinfo\|json\|sha256sums\|packages\)$" -exec rm -rf {} +
+
+            for FILE in $(find ./bin/targets/ -type f -iname "*$WRT_TARGET*") ; do
+              EXT=$(basename $FILE | cut -d '.' -f 2-)
+              NAME=$(basename $FILE | cut -d '.' -f 1 | grep -io "\($WRT_TARGET\).*")
+              NEW_FILE="$NAME"-"$WRT_INFO"-"$WRT_BRANCH"-"$WRT_WIFI"-"$WRT_DATE"."$EXT"
+              mv -f $FILE ./upload/$NEW_FILE
+            done
+
+            find ./bin/targets/ -type f -exec mv -f {} ./upload/ \;
+
+            make clean -j$(nproc)
+          fi
+
+      - name: Release Firmware
+        uses: softprops/action-gh-release@master
+        with:
+          tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
+          files: ./wrt/upload/*.*
+          body: |
+            这是个平台固件包，内含多个设备！
+            请注意选择你需要的设备固件！
+            不要问，刷就完事了！
+
+            全系带闭源硬件加速，别问了！
+
+            源码：${{env.WRT_REPO}}
+            分支：${{env.WRT_BRANCH}}
+            提交：${{env.WRT_HASH}}
+
+            配置：${{env.WRT_CONFIG}}
+            平台：${{env.WRT_TARGET}}
+
+            登录地址：${{env.WRT_IP}}
+            登录密码：${{env.WRT_PW}}
+
+            WIFI名称：${{env.WRT_SSID}}
+            WIFI密码：${{env.WRT_WORD}}
+
+            内核版本：${{env.WRT_KVER}}
+            插件列表：${{env.WRT_LIST}}
