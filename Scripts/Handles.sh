@@ -447,3 +447,42 @@ if [ -d "package" ]; then
 fi
 
 echo "5G has been fixed!"
+
+# =================================================================
+# 25.12: 回退 luci-app-mtwifi-cfg 的依赖到 Lua 实现
+# =================================================================
+# 背景：25.12 上游把这套 wifi 配置 UI 迁移到了新的 ucode 架构：
+#     luci-app-mtwifi-cfg  LUCI_DEPENDS:+mtwifi-cfg-ucode
+#       └─ mtwifi-cfg-ucode  DEPENDS:... +iwinfo-ucode
+#            └─ iwinfo-ucode  DEPENDS:+ucode-mod-iwinfo @!PACKAGE_iwinfo
+# 而 iwinfo-ucode 带 @!PACKAGE_iwinfo 守卫，与系统默认启用的 iwinfo 互斥，
+# 于是整条 ucode 链被 kconfig 隐藏，连带 luci-app-mtwifi-cfg 一起消失。
+#
+# 实测现象（25.12-CPE 固件）：
+#   - LuCI 只剩「网络 → 无线」标准页
+#   - 无「信道 / 区域(Country) / 发射功率」等 MTK 高级选项
+#   而 24.10-CPE 正常 —— 因其 luci-app-mtwifi-cfg(LUCI_DEPENDS:+mtwifi-cfg)
+#   走的是纯 Lua 实现，不依赖 ucode 栈。
+#
+# 决策：25.12 回退到与 24.10 相同的 Lua 实现（+mtwifi-cfg）。
+# 理由：两套源码的 luci-app-mtwifi-cfg **安装文件完全相同**（都是
+#   root/usr/share/luci-app-mtwifi-cfg/wireless-mtk.js），仅 Makefile
+#   依赖不同；且该 UI 通过 rpc object 'iwinfo'（由 rpcd-mod-iwinfo 提供）
+#   取信道/功率/国家列表，不依赖 iwinfo-ucode 包。
+#   mtwifi-cfg(25.12) 的守卫 @!PACKAGE_luci-app-mtk / @!PACKAGE_wifi-profile
+#   在本配置下均未启用，守卫通过。
+# 参见 Config/GENERAL.txt:136 的 CONFIG_PACKAGE_luci-app-mtwifi-cfg=y。
+if [[ "${WRT_BRANCH}" == *"25.12"* ]]; then
+    MCFG_MK="package/mtk/applications/luci-app-mtwifi-cfg/Makefile"
+    if [ -f "$MCFG_MK" ]; then
+        if grep -q '+mtwifi-cfg-ucode' "$MCFG_MK"; then
+            sed -i 's/+mtwifi-cfg-ucode/+mtwifi-cfg/' "$MCFG_MK"
+            echo "25.12: luci-app-mtwifi-cfg deps -> Lua mtwifi-cfg (ucode stack blocked by @!PACKAGE_iwinfo)"
+        else
+            echo "25.12: luci-app-mtwifi-cfg deps already Lua or not found; skip"
+        fi
+        grep -n 'LUCI_DEPENDS' "$MCFG_MK" || true
+    else
+        echo "warning: $MCFG_MK not found; mtwifi UI may be missing"
+    fi
+fi

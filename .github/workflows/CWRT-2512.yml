@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 VIKINGYFY
+
+#CI项目：25.12 独立编译
+# 与 CWRT-ALL.yml（24.10）完全分离的原因：
+#   1) 源码分支不同（chasey-dev/immortalwrt-mt798x-rebase @ 25.12）
+#   2) 内核不同（6.12 vs 6.6），驱动的内核 API 适配不同
+#   3) 包体系不同（25.12 用 apk，24.10 用 opkg）
+#   4) 配置有差异（wifi 栈、包名等 —— 见 Scripts/Handles.sh 的 25.12 分支逻辑）
+#   5) 25.12 属实验分支，失败不应拖累 24.10 的发布
+# 因此两者各自独立触发、独立记录，互不干扰。
+name: CWRT-2512
+
+#CI计划
+on:
+  # 注意：不设 schedule，避免与 24.10 的周期编译抢资源。
+  # 需要周期编译时再自行添加 cron。
+  #手动编译
+  workflow_dispatch:
+    inputs:
+      PACKAGE:
+        description: '手动调整插件包，多个请用\n符号隔开。'
+        required: false
+        type: string
+      TEST:
+        description: '仅输出配置文件，不编译固件。'
+        default: 'false'
+        required: false
+        type: boolean
+
+env:
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+#CI权限
+permissions: write-all
+
+#CI任务
+jobs:
+  # 只清理本 workflow（25.12）自己的产物。
+  # 不能照抄 CWRT-ALL.yml 的 ophub/delete-releases-workflows：
+  # 那个 action 会删除【全部】releases（releases_keep_latest: 0），
+  # 连 24.10 的固件一起删掉。
+  # 25.12 的 tag 形如 CPE-chasey-dev-25.12-<date> / MT7981-25.12-chasey-dev-25.12-<date>，
+  # 统一含子串 'chasey-dev-25.12'，据此精确清理。
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      GH_REPO: ${{github.repository}}
+    steps:
+      - name: Delete old 25.12 Releases and Workflows
+        run: |
+          set -uo pipefail
+
+          # 1) 删除含 'chasey-dev-25.12' 的 release（含其 tag）
+          gh release list --repo "$GH_REPO" --limit 200 --json tagName --jq '.[].tagName' |
+            while IFS= read -r TAG; do
+              case "$TAG" in
+                *chasey-dev-25.12*)
+                  echo "deleting release: $TAG"
+                  gh release delete "$TAG" --repo "$GH_REPO" --yes --cleanup-tag || \
+                    echo "warning: failed to delete $TAG"
+                  ;;
+              esac
+            done
+
+          # 2) 清理本 workflow 的历史 run，保留最近 3 次便于回溯
+          gh run list --repo "$GH_REPO" --workflow CWRT-2512.yml \
+            --limit 100 --json databaseId,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].databaseId' |
+            while IFS= read -r RID; do
+              [ -n "$RID" ] || continue
+              echo "deleting run: $RID"
+              gh run delete "$RID" --repo "$GH_REPO" || \
+                echo "warning: failed to delete run $RID"
+            done
+
+          echo "25.12 cleanup done (24.10 releases untouched)"
+
+  config:
+    needs: cleanup
+    name: ${{matrix.LABEL}}
+    strategy:
+      fail-fast: false
+      #max-parallel: 4
+      # 显式列举组合。25.12 专用 Config：
+      #   MT7981-25.12.txt : 25.12 的 filogic.mk 无 cmcc_rax3000m-nand-mtk/-emmc-mtk
+      #   CPE.txt          : 与 24.10 共用（target 与设备经核验一致）
+      matrix:
+        include:
+          - CONFIG: "MT7981-25.12"
+            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
+            BRANCH: "25.12"
+            LABEL: "MT7981-25.12"
+          - CONFIG: "CPE"
+            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
+            BRANCH: "25.12"
+            LABEL: "CPE-25.12"
+
+    #调用公用编译核心WRT-CORE.yml
+    uses: ./.github/workflows/WRT-CORE.yml
+    with:
+      #编译配置
+      WRT_CONFIG: ${{matrix.CONFIG}}
+      #默认主题
+      WRT_THEME: aurora
+      #默认主机名
+      WRT_NAME: CWRT
+      #默认WIFI名称
+      WRT_SSID: CWRT
+      #默认WIFI密码
+      WRT_WORD: 12345678
+      #默认地址
+      WRT_IP: 192.168.10.1
+      #默认密码，仅作提示，修改无用
+      WRT_PW: 无
+      #源码链接
+      WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
+      #源码分支
+      WRT_BRANCH: ${{matrix.BRANCH}}
+      #源码名称
+      WRT_SOURCE: ${{matrix.SOURCE}}
+      #插件调整
+      WRT_PACKAGE: ${{inputs.PACKAGE}}
+      #仅输出配置文件
+      WRT_TEST: ${{inputs.TEST}}

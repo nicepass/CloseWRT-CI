@@ -30,18 +30,46 @@ permissions: write-all
 
 #CI任务
 jobs:
+  # 只清理本 workflow（24.10）自己的产物。
+  # 原先用 ophub/delete-releases-workflows 且 releases_keep_latest: 0，
+  # 会删除仓库内【全部】releases —— 包括 25.12（CWRT-2512.yml）的固件。
+  # 既然 25.12 已独立成 workflow，两者产物必须互不可删：
+  #   24.10 的 tag 含 'Yuzhii0718-openwrt-24.10-6.6'
+  #   25.12 的 tag 含 'chasey-dev-25.12'
   cleanup:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      GH_REPO: ${{github.repository}}
     steps:
-      - name: Delete old Releases and Workflows
-        uses: ophub/delete-releases-workflows@main
-        with:
-          gh_token: ${{secrets.GITHUB_TOKEN}}
-          delete_releases: true
-          releases_keep_latest: 0
-          delete_tags: true
-          delete_workflows: true
-          workflows_keep_day: 0
+      - name: Delete old 24.10 Releases and Workflows
+        run: |
+          set -uo pipefail
+
+          # 1) 只删含 'Yuzhii0718-openwrt-24.10-6.6' 的 release（含其 tag）
+          gh release list --repo "$GH_REPO" --limit 200 --json tagName --jq '.[].tagName' |
+            while IFS= read -r TAG; do
+              case "$TAG" in
+                *Yuzhii0718-openwrt-24.10-6.6*)
+                  echo "deleting release: $TAG"
+                  gh release delete "$TAG" --repo "$GH_REPO" --yes --cleanup-tag || \
+                    echo "warning: failed to delete $TAG"
+                  ;;
+              esac
+            done
+
+          # 2) 清理本 workflow 的历史 run，保留最近 3 次
+          gh run list --repo "$GH_REPO" --workflow CWRT-ALL.yml \
+            --limit 100 --json databaseId,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].databaseId' |
+            while IFS= read -r RID; do
+              [ -n "$RID" ] || continue
+              echo "deleting run: $RID"
+              gh run delete "$RID" --repo "$GH_REPO" || \
+                echo "warning: failed to delete run $RID"
+            done
+
+          echo "24.10 cleanup done (25.12 releases untouched)"
 
   config:
     needs: cleanup
@@ -50,9 +78,9 @@ jobs:
       fail-fast: false
       #max-parallel: 4
       # 显式列举组合（而非笛卡尔积），便于为不同源码指定专用 Config：
-      #  - MT7981.txt       : 24.10-6.6 专用（含 cmcc_rax3000m-nand-mtk）
-      #  - MT7981-25.12.txt : 25.12 专用（25.12 无 -nand-mtk/-emmc-mtk 设备）
-      #  - CPE.txt          : 两套源码共用（target 与设备在两套中一致）
+      #  - 本 workflow 仅负责 24.10-6.6（与上游 VIKINGYFY/CloseWRT-CI 对齐）
+      #  - 25.12 已独立到 CWRT-2512.yml，避免两者互相干扰
+      #    （源码/内核/feeds/配置 均不同，失败模式也不同）
       matrix:
         include:
           - CONFIG: "MT7981"
@@ -63,14 +91,6 @@ jobs:
             SOURCE: "Yuzhii0718/immortalwrt-mt798x-6.6-padavanonly"
             BRANCH: "openwrt-24.10-6.6"
             LABEL: "CPE-24.10-6.6"
-          - CONFIG: "MT7981-25.12"
-            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
-            BRANCH: "25.12"
-            LABEL: "MT7981-25.12"
-          - CONFIG: "CPE"
-            SOURCE: "chasey-dev/immortalwrt-mt798x-rebase"
-            BRANCH: "25.12"
-            LABEL: "CPE-25.12"
 
     #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
