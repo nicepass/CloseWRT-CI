@@ -13,8 +13,10 @@ name: CWRT-2512
 
 #CI计划
 on:
-  # 注意：不设 schedule，避免与 24.10 的周期编译抢资源。
-  # 需要周期编译时再自行添加 cron。
+  #自动编译：与 CWRT-ALL.yml（24.10）保持一致 —— 每周一早上 5 点（UTC-8）
+  #  cron 0 21 * * 0 是 UTC 周日 21:00 = 北京时间周一 05:00
+  schedule:
+    - cron: 0 21 * * 0
   #手动编译
   workflow_dispatch:
     inputs:
