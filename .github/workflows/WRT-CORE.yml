@@ -62,7 +62,17 @@ env:
 jobs:
   core:
     name: ${{inputs.WRT_SOURCE}}
-    runs-on: ubuntu-latest
+    # 【必须固定 runner 版本，不能用 ubuntu-latest】
+    # immortalwrt 官方 init_build_environment.sh 按 $VERSION_CODENAME 分支加载
+    # 版本化的工具链（gcc-$GCC_VERSION / clang-$LLVM_VERSION / golang-1.25-go），
+    # 其白名单只含 focal(20.04) / jammy(22.04) / noble(24.04)。
+    # GitHub 于 2026-10 把 ubuntu-latest 提升到 ubuntu-26.04，脚本直接拒绝：
+    #   [INFO] Checking system info...
+    #   [ERROR] Unsupported OS, use Ubuntu 20.04 instead.
+    # → 全部 matrix job 在 Initialization Environment 阶段失败
+    #   （run 40243216267，连编译都没开始）。
+    # 固定 noble 既在官方白名单内，又能拿到脚本期望的 gcc-13 / llvm-18。
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Projects
         uses: actions/checkout@main
@@ -78,7 +88,17 @@ jobs:
           sudo -E apt -yqq autoclean
           sudo -E apt -yqq clean
           sudo -E apt -yqq install dos2unix libfuse-dev
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+          # 官方脚本是按发行版分支装版本化工具链的唯一可靠来源；
+          # 若其白名单再次落后（GitHub 换 runner），这里显式报错，
+          # 而不是让后续编译在数十分钟后以无关错误炸掉。
+          if ! sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'; then
+            echo "::error::immortalwrt init_build_environment.sh failed."
+            echo "::error::Current runner: $(lsb_release -ds 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME)"
+            echo "::error::The script supports focal/jammy/noble only. Pin runs-on to one of those (currently ubuntu-24.04)."
+            exit 1
+          fi
+
           sudo -E systemctl daemon-reload
           sudo -E timedatectl set-timezone "Asia/Shanghai"
 
