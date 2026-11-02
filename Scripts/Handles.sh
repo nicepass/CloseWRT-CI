@@ -502,37 +502,63 @@ fi
 # 上游同款修复见 VIKINGYFY/CloseWRT-CI 3474cfb。
 # 注意：本脚本从 wrt/package/ 执行，故 feed 路径是 ../feeds/。
 # ═══════════════════════════════════════════════════════════════════════
-# 两处都要清：源码在 feeds/，但 feeds install 后 make 真正编译的是
-# package/feeds/qmodem/ndisc6（指向源码的链接/副本）。只删源码处不重建索引时，
-# 索引里仍留着这个包，make 会继续走 package/feeds/qmodem/ndisc6 并再次失败。
-NDISC_SRC="feeds/qmodem/application/ndisc6"
-NDISC_LINK="package/feeds/qmodem/ndisc6"
-NDISC_CLEANED=0
+# ndisc6 源码站已整体下线，必须把 PKG_SOURCE_URL 改到原站 archive 目录。
+#
+# 失效证据（run 41378857678 / 41395155572 逐源实测）：
+#   http://www.remlab.net/files/ndisc6/...       410 Gone（原作者已下架 1.0.2）
+#   mirror2.immortalwrt.org/sources/...          403
+#   mirror.immortalwrt.org / sources*.openwrt.org 404
+# 而 https://www.remlab.net/files/ndisc6/archive/ 仍保留全部历史版本，
+# 实测 1.0.2 可下载且 MD5=50cb4c19606cf6ff2b7388e71832f579，
+# 与两处 Makefile 的 PKG_MD5SUM 完全一致 —— 因此只换 URL，不换版本。
+#
+# 存在两处声明同一 tarball 的副本：
+#   A) SDK   package/mtk/applications/ndisc/Makefile      （24.10 有，25.12 无）
+#   B) QModem feeds/qmodem/application/ndisc6/Makefile
+# run 41395155572（24.10）证明：只删 B 而不管 A，A 照样下载同一个失效 URL
+# 并失败 —— 所以 A 必须单独修 URL；B 在有 A 时删除以免重复定义。
+# 注意 Handles.sh 已 cd 到构建根，下列路径均相对构建根。
+# ═══════════════════════════════════════════════════════════════════════
+NDISC_ARCHIVE_URL="https://www.remlab.net/files/ndisc6/archive"
+NDISC_SDK_MK="package/mtk/applications/ndisc/Makefile"
+NDISC_QMODEM_SRC="feeds/qmodem/application/ndisc6"
+NDISC_QMODEM_LINK="package/feeds/qmodem/ndisc6"
+NDISC_CHANGED=0
 
-if [ -e "$NDISC_SRC" ] || [ -e "$NDISC_LINK" ]; then
-	if [ -d "package/mtk/applications/ndisc" ]; then
-		[ -e "$NDISC_LINK" ] && rm -rf "$NDISC_LINK"
-		[ -e "$NDISC_SRC" ] && rm -rf "$NDISC_SRC"
-		NDISC_CLEANED=1
-		echo "qmodem-ndisc6 removed (SDK already provides package/mtk/applications/ndisc)"
+# A) 修 SDK 版（24.10 的唯一下载者）
+if [ -f "$NDISC_SDK_MK" ]; then
+	if grep -q '^PKG_SOURCE_URL:=.*remlab\.net' "$NDISC_SDK_MK"; then
+		sed -i "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=$NDISC_ARCHIVE_URL|" "$NDISC_SDK_MK"
+		NDISC_CHANGED=1
+		echo "ndisc (SDK) PKG_SOURCE_URL -> remlab archive"
 	else
-		# SDK 没有 ndisc 时不能删，否则 ipv6 发现工具会整体缺失；
-		# 退化为把源码地址指向原站 archive（1.0.2 仍在，MD5 与 Makefile 一致）。
-		NDISC_MK="$NDISC_SRC/Makefile"
-		if [ -f "$NDISC_MK" ]; then
-			sed -i 's|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://www.remlab.net/files/ndisc6/archive|' "$NDISC_MK"
-			NDISC_CLEANED=1
-			echo "qmodem-ndisc6 kept; PKG_SOURCE_URL redirected to remlab archive"
+		echo "ndisc (SDK) PKG_SOURCE_URL already rewritten or not remlab; skip"
+	fi
+fi
+
+# B) 有 SDK 版时删掉 QModem 的重复副本；没有则同样把它的 URL 改到 archive
+if [ -e "$NDISC_QMODEM_SRC" ] || [ -e "$NDISC_QMODEM_LINK" ]; then
+	if [ -f "$NDISC_SDK_MK" ]; then
+		[ -e "$NDISC_QMODEM_LINK" ] && rm -rf "$NDISC_QMODEM_LINK"
+		[ -e "$NDISC_QMODEM_SRC" ] && rm -rf "$NDISC_QMODEM_SRC"
+		NDISC_CHANGED=1
+		echo "qmodem-ndisc6 removed (SDK package/mtk/applications/ndisc is the single provider)"
+	else
+		NDISC_QMK="$NDISC_QMODEM_SRC/Makefile"
+		if [ -f "$NDISC_QMK" ] && grep -q '^PKG_SOURCE_URL:=.*remlab\.net' "$NDISC_QMK"; then
+			sed -i "s|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=$NDISC_ARCHIVE_URL|" "$NDISC_QMK"
+			NDISC_CHANGED=1
+			echo "qmodem-ndisc6 kept (no SDK copy); PKG_SOURCE_URL -> remlab archive"
 		fi
 	fi
 else
 	echo "qmodem-ndisc6 not present; skip"
 fi
 
-# 删包后必须重建索引，否则 kconfig/feeds 仍认为该包存在（Layer 3: 索引陈旧）
-if [ "$NDISC_CLEANED" = "1" ]; then
+# 删除包后必须重建索引，否则 kconfig/feeds 仍认为它存在（Layer 3: 索引陈旧）
+if [ "$NDISC_CHANGED" = "1" ]; then
 	if ./scripts/feeds update -i >/dev/null 2>&1; then
-		echo "feeds index rebuilt after ndisc6 cleanup"
+		echo "feeds index rebuilt after ndisc6 fix"
 	else
 		echo "warning: feeds update -i failed; continuing"
 	fi
@@ -542,7 +568,7 @@ fi
 # mihomo 双向 CONFLICTS 形成 Kconfig 循环（上游 3474cfb）
 # mihomo-alpha 声明 CONFLICTS:=mihomo-meta，而 mihomo-meta 也声明了反向
 # CONFLICTS，kconfig 解析时会判定为递归依赖。只保留 meta 一侧的声明。
-# 从 wrt/package/ 执行，故路径为 ./OpenWrt-nikki/。
+# Handles.sh 已 cd 到构建根，故路径为 package/OpenWrt-nikki/。
 # ═══════════════════════════════════════════════════════════════════════
 MIHOMO_ALPHA="package/OpenWrt-nikki/mihomo-alpha/Makefile"
 if [ -f "$MIHOMO_ALPHA" ]; then
@@ -558,7 +584,7 @@ fi
 # 新版 WeeChat 拆出 weechat-minimal 虚拟依赖后，luci-app-weechat 直接写
 # +weechat 会导致 Kconfig 自循环（上游 3474cfb）。
 # 仅当 packages feed 确实提供了 Package/weechat-minimal 时才改，保持幂等。
-# 从 wrt/package/ 执行，故 feed 路径为 ../feeds/。
+# Handles.sh 已 cd 到构建根，故 feed 路径为 feeds/。
 # ═══════════════════════════════════════════════════════════════════════
 WEECHAT_MK="feeds/packages/net/weechat/Makefile"
 LUCI_WEECHAT_MK="feeds/luci/applications/luci-app-weechat/Makefile"
