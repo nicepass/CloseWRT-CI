@@ -486,3 +486,83 @@ if [[ "${WRT_BRANCH}" == *"25.12"* ]]; then
         echo "warning: $MCFG_MK not found; mtwifi UI may be missing"
     fi
 fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# QModem 自带的 ndisc6 与 SDK 内 package/mtk/applications/ndisc 重复，
+# 且其 PKG_SOURCE_URL (http://www.remlab.net/files/ndisc6) 已整体下线：
+#   remlab 现已 410 Gone，OpenWrt/ImmortalWrt 各家 sources 镜像均 404/403。
+# 两个副本同时存在时，qmodem 那份先失败，进而拖垮 SDK 版（ndisc 编译依赖它），
+# 表现为 run 41367219961 的连锁失败：
+#   curl: (28) Connection timed out after 20002 milliseconds
+#   Download failed. / No more mirrors to try - giving up.
+#   ERROR: package/feeds/qmodem/ndisc6 failed to build.
+#   ERROR: package/mtk/applications/ndisc failed to build.
+# SDK 版 ndisc 用的是同一份源码声明，但它的 URL 由 SDK 维护、可正常解析，
+# 因此正确做法是删掉 QModem 里的重复副本，而不是给失效 URL 打补丁。
+# 上游同款修复见 VIKINGYFY/CloseWRT-CI 3474cfb。
+# 注意：本脚本从 wrt/package/ 执行，故 feed 路径是 ../feeds/。
+# ═══════════════════════════════════════════════════════════════════════
+if [ -d "../feeds/qmodem/application/ndisc6" ]; then
+	if [ -d "./mtk/applications/ndisc" ]; then
+		rm -rf ../feeds/qmodem/application/ndisc6
+		echo "qmodem-ndisc6 removed (SDK already provides mtk/applications/ndisc)"
+	else
+		# SDK 没有 ndisc 时不能删，否则 ipv6 发现工具会整体缺失；
+		# 退化为把源码地址指向原站 archive（1.0.2 仍在，MD5 与 Makefile 一致）。
+		NDISC_MK="../feeds/qmodem/application/ndisc6/Makefile"
+		if [ -f "$NDISC_MK" ]; then
+			sed -i 's|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://www.remlab.net/files/ndisc6/archive|' "$NDISC_MK"
+			echo "qmodem-ndisc6 kept; PKG_SOURCE_URL redirected to remlab archive"
+		fi
+	fi
+else
+	echo "qmodem-ndisc6 not present; skip"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# mihomo 双向 CONFLICTS 形成 Kconfig 循环（上游 3474cfb）
+# mihomo-alpha 声明 CONFLICTS:=mihomo-meta，而 mihomo-meta 也声明了反向
+# CONFLICTS，kconfig 解析时会判定为递归依赖。只保留 meta 一侧的声明。
+# 从 wrt/package/ 执行，故路径为 ./OpenWrt-nikki/。
+# ═══════════════════════════════════════════════════════════════════════
+MIHOMO_ALPHA="./OpenWrt-nikki/mihomo-alpha/Makefile"
+if [ -f "$MIHOMO_ALPHA" ]; then
+	if grep -q '^  CONFLICTS:=mihomo-meta$' "$MIHOMO_ALPHA"; then
+		sed -i '/^  CONFLICTS:=mihomo-meta$/d' "$MIHOMO_ALPHA"
+		echo "mihomo-alpha CONFLICTS removed (avoid Kconfig recursion with mihomo-meta)"
+	else
+		echo "mihomo-alpha CONFLICTS already absent; skip"
+	fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# 新版 WeeChat 拆出 weechat-minimal 虚拟依赖后，luci-app-weechat 直接写
+# +weechat 会导致 Kconfig 自循环（上游 3474cfb）。
+# 仅当 packages feed 确实提供了 Package/weechat-minimal 时才改，保持幂等。
+# 从 wrt/package/ 执行，故 feed 路径为 ../feeds/。
+# ═══════════════════════════════════════════════════════════════════════
+WEECHAT_MK="../feeds/packages/net/weechat/Makefile"
+LUCI_WEECHAT_MK="../feeds/luci/applications/luci-app-weechat/Makefile"
+if [ -f "$WEECHAT_MK" ] && grep -q '^define Package/weechat-minimal$' "$WEECHAT_MK"; then
+	if [ -f "$LUCI_WEECHAT_MK" ]; then
+		if grep -q ' +weechat ' "$LUCI_WEECHAT_MK"; then
+			sed -i 's/ +weechat / +!PACKAGE_weechat-full:weechat-minimal +PACKAGE_weechat-full:weechat-full /g' "$LUCI_WEECHAT_MK"
+			echo "luci-app-weechat dependency rewritten (weechat-minimal virtual dep)"
+		else
+			echo "luci-app-weechat dependency already rewritten; skip"
+		fi
+	fi
+fi
+
+#修改vantage进度条标签字体（anothaDev/luci-theme-vantage#52，上游 fa88e23）
+#dev 默认主题是 aurora，未拉取 vantage 时此段自动跳过。
+if [ -d "$PKG_PATH/luci-theme-vantage" ]; then
+	echo " "
+	if sed -i \
+		-e '/^\/\* progress bars: thin track/,$ { /.cbi-progressbar::before {/,/^}/ { s/^[[:space:]]*font: 500 var(--fs-micro)\/1\.2 var(--mono);/\tfont: inherit; line-height: normal;/; } }' \
+		"$PKG_PATH/luci-theme-vantage/luci-theme-vantage/htdocs/luci-static/vantage/vantage.css"; then
+		echo "theme-vantage has been fixed!"
+	else
+		echo "theme-vantage fix failed; continuing!"
+	fi
+fi
