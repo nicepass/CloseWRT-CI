@@ -502,21 +502,40 @@ fi
 # 上游同款修复见 VIKINGYFY/CloseWRT-CI 3474cfb。
 # 注意：本脚本从 wrt/package/ 执行，故 feed 路径是 ../feeds/。
 # ═══════════════════════════════════════════════════════════════════════
-if [ -d "../feeds/qmodem/application/ndisc6" ]; then
-	if [ -d "./mtk/applications/ndisc" ]; then
-		rm -rf ../feeds/qmodem/application/ndisc6
-		echo "qmodem-ndisc6 removed (SDK already provides mtk/applications/ndisc)"
+# 两处都要清：源码在 feeds/，但 feeds install 后 make 真正编译的是
+# package/feeds/qmodem/ndisc6（指向源码的链接/副本）。只删源码处不重建索引时，
+# 索引里仍留着这个包，make 会继续走 package/feeds/qmodem/ndisc6 并再次失败。
+NDISC_SRC="feeds/qmodem/application/ndisc6"
+NDISC_LINK="package/feeds/qmodem/ndisc6"
+NDISC_CLEANED=0
+
+if [ -e "$NDISC_SRC" ] || [ -e "$NDISC_LINK" ]; then
+	if [ -d "package/mtk/applications/ndisc" ]; then
+		[ -e "$NDISC_LINK" ] && rm -rf "$NDISC_LINK"
+		[ -e "$NDISC_SRC" ] && rm -rf "$NDISC_SRC"
+		NDISC_CLEANED=1
+		echo "qmodem-ndisc6 removed (SDK already provides package/mtk/applications/ndisc)"
 	else
 		# SDK 没有 ndisc 时不能删，否则 ipv6 发现工具会整体缺失；
 		# 退化为把源码地址指向原站 archive（1.0.2 仍在，MD5 与 Makefile 一致）。
-		NDISC_MK="../feeds/qmodem/application/ndisc6/Makefile"
+		NDISC_MK="$NDISC_SRC/Makefile"
 		if [ -f "$NDISC_MK" ]; then
 			sed -i 's|^PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://www.remlab.net/files/ndisc6/archive|' "$NDISC_MK"
+			NDISC_CLEANED=1
 			echo "qmodem-ndisc6 kept; PKG_SOURCE_URL redirected to remlab archive"
 		fi
 	fi
 else
 	echo "qmodem-ndisc6 not present; skip"
+fi
+
+# 删包后必须重建索引，否则 kconfig/feeds 仍认为该包存在（Layer 3: 索引陈旧）
+if [ "$NDISC_CLEANED" = "1" ]; then
+	if ./scripts/feeds update -i >/dev/null 2>&1; then
+		echo "feeds index rebuilt after ndisc6 cleanup"
+	else
+		echo "warning: feeds update -i failed; continuing"
+	fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -525,7 +544,7 @@ fi
 # CONFLICTS，kconfig 解析时会判定为递归依赖。只保留 meta 一侧的声明。
 # 从 wrt/package/ 执行，故路径为 ./OpenWrt-nikki/。
 # ═══════════════════════════════════════════════════════════════════════
-MIHOMO_ALPHA="./OpenWrt-nikki/mihomo-alpha/Makefile"
+MIHOMO_ALPHA="package/OpenWrt-nikki/mihomo-alpha/Makefile"
 if [ -f "$MIHOMO_ALPHA" ]; then
 	if grep -q '^  CONFLICTS:=mihomo-meta$' "$MIHOMO_ALPHA"; then
 		sed -i '/^  CONFLICTS:=mihomo-meta$/d' "$MIHOMO_ALPHA"
@@ -541,8 +560,8 @@ fi
 # 仅当 packages feed 确实提供了 Package/weechat-minimal 时才改，保持幂等。
 # 从 wrt/package/ 执行，故 feed 路径为 ../feeds/。
 # ═══════════════════════════════════════════════════════════════════════
-WEECHAT_MK="../feeds/packages/net/weechat/Makefile"
-LUCI_WEECHAT_MK="../feeds/luci/applications/luci-app-weechat/Makefile"
+WEECHAT_MK="feeds/packages/net/weechat/Makefile"
+LUCI_WEECHAT_MK="feeds/luci/applications/luci-app-weechat/Makefile"
 if [ -f "$WEECHAT_MK" ] && grep -q '^define Package/weechat-minimal$' "$WEECHAT_MK"; then
 	if [ -f "$LUCI_WEECHAT_MK" ]; then
 		if grep -q ' +weechat ' "$LUCI_WEECHAT_MK"; then
@@ -556,11 +575,11 @@ fi
 
 #修改vantage进度条标签字体（anothaDev/luci-theme-vantage#52，上游 fa88e23）
 #dev 默认主题是 aurora，未拉取 vantage 时此段自动跳过。
-if [ -d "$PKG_PATH/luci-theme-vantage" ]; then
+if [ -d "package/luci-theme-vantage" ]; then
 	echo " "
 	if sed -i \
 		-e '/^\/\* progress bars: thin track/,$ { /.cbi-progressbar::before {/,/^}/ { s/^[[:space:]]*font: 500 var(--fs-micro)\/1\.2 var(--mono);/\tfont: inherit; line-height: normal;/; } }' \
-		"$PKG_PATH/luci-theme-vantage/luci-theme-vantage/htdocs/luci-static/vantage/vantage.css"; then
+		"package/luci-theme-vantage/luci-theme-vantage/htdocs/luci-static/vantage/vantage.css"; then
 		echo "theme-vantage has been fixed!"
 	else
 		echo "theme-vantage fix failed; continuing!"
